@@ -1,7 +1,7 @@
 import neovim as nvim
 import os
 import os.path
-
+import re
 
 @nvim.plugin
 class LBuildFileHinter(object):
@@ -10,7 +10,59 @@ class LBuildFileHinter(object):
 
   @nvim.function('_lbuild_get_build_root', sync=True)
   def _get_root_path(self, args):
-    return self.get_root_path()
+    try:
+      return self.get_root_path()
+    except:
+      pass
+
+  @nvim.function('_lbuild_root_relative_path', sync=True)
+  def _get_relative_path(self, args):
+    curr = self.vim.command_output("echo expand('%:p')")
+    try:
+      curr = os.path.relpath(curr, self.get_root_path())
+      return curr
+    except:
+      return curr
+
+  @nvim.function('_lbuild_get_hints', sync=True)
+  def _load_file_and_get_hints(self, args):
+    try:
+      path = self.get_buildfile_on_current_pos()
+      if path is not None:
+        return self.load_file_and_get_hints(path)
+      return []
+    except:
+      return []
+
+  @nvim.function('_lbuild_all_targets', sync=True)
+  def _get_all_target(self, args):
+    try:
+      return self.get_all_targets()
+    except:
+      return []
+
+  @nvim.function('_lbuild_current_build', sync=True)
+  def _get_buildfile_on_current_pos(self, args):
+    try:
+      return self.get_buildfile_on_current_pos()
+    except:
+      pass
+
+  def get_buildfile_on_current_pos(self):
+    line = self.vim.current.line
+    _, col = self.vim.current.window.cursor
+    line = line[:col]
+    res = re.findall(r'\s*"(.*)?:', line)
+    if not res:
+      return None
+    
+    path = res[-1]
+    
+    if path.startswith('//'):
+      path = os.path.join(self.get_root_path(), path[2:])
+    else:
+      path = self.vim.command_output("echo expand('%:p')")
+    return path
 
   def get_root_path(self):
     current_file = self.vim.command_output("echo expand('%:p')")
@@ -29,9 +81,24 @@ class LBuildFileHinter(object):
 
     return None
 
-  @nvim.function('_lbuild_get_hints', sync=True)
-  def load_file_and_get_hints(self, args):
-    filename = args[0]
+  def get_all_targets(self):
+    import glob
+    root_path = self.get_root_path()
+    build_files = glob.glob(os.path.join(root_path, '**', 'BUILD'), recursive=True)
+    result = []
+    for build in build_files:
+      res = self.load_file_and_get_hints(build)
+      if res is not None:
+        for target in res:
+          result.append({
+            'target': target['word'],
+            'file': os.path.relpath(build, root_path)
+          })
+    return result
+
+  def load_file_and_get_hints(self, filename):
+    if filename is None:
+      return []
 
     libraries = []
     def cc_library(**kwargs):
@@ -51,5 +118,21 @@ class LBuildFileHinter(object):
       'cc_binary': cc_binary,
       'cc_test': cc_test,
     })
-    print(libraries)
-    return libraries
+
+    complete_items = []
+    for item in libraries:
+      complete_items.append({
+        "word": item,
+        "menu": 'RULE at {}'.format(os.path.relpath(filename, self.get_root_path()))
+      })
+
+    return complete_items
+
+if __name__ == '__main__':
+  nvi = nvim.attach('socket', path='/var/folders/wc/5nws943d0j5c76mn60w8vvsr0000gn/T/nvimv3xPId/0')
+
+  finder = LBuildFileHinter(nvi)
+
+  filename = finder.get_buildfile_on_current_pos()
+  print(filename)
+  print(finder.load_file_and_get_hints(filename))
