@@ -44,9 +44,33 @@ class LBuildFileHinter(object):
   @nvim.function('_lbuild_current_build', sync=True)
   def _get_buildfile_on_current_pos(self, args):
     try:
-      return self.get_buildfile_on_current_pos()
+      if args and args[0]:
+        relative = True
+      else:
+        relative = False
+
+      current_file = self.vim.command_output("echo expand('%:p')")
+      current_path, _ = os.path.split(current_file)
+
+      def find_blade_root(p):
+        filename = os.path.join(p, 'BUILD')
+        if os.path.exists(filename):
+          return True
+        return False
+
+      while current_path != '/':
+        if find_blade_root(current_path):
+          if not relative:
+            return os.path.join(current_path, 'BUILD')
+          else:
+            p = os.path.join(current_path, 'BUILD')
+            return os.path.relpath(p, self.get_root_path())
+
+        current_path, _ = os.path.split(current_path)
     except:
       pass
+    
+    return None
 
   def get_buildfile_on_current_pos(self):
     line = self.vim.current.line
